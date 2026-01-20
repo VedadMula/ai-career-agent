@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import yaml
+from sources.indeed import IndeedSource
+from sources.monster import MonsterSource
+from sources.ziprecruiter import ZipRecruiterSource
+
 
 
 def load_config(config_path: Path) -> dict:
@@ -46,6 +50,21 @@ def print_run_plan(cfg: dict) -> None:
     print(f"  Path: {output.get('path')}")
     print("===============================================")
 
+def build_sources(enabled: list[str]):
+    registry = {
+        "indeed": IndeedSource,
+        "monster": MonsterSource,
+        "ziprecruiter": ZipRecruiterSource,
+    }
+
+    sources = []
+    for name in enabled:
+        cls = registry.get(name)
+        if cls is None:
+            print(f"WARNING: Unknown source '{name}' - skipping")
+            continue
+        sources.append(cls())
+    return sources
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
@@ -54,6 +73,17 @@ def main() -> int:
     try:
         cfg = load_config(config_path)
         print_run_plan(cfg)
+        enabled = cfg.get("sources", {}).get("enabled", [])
+        sources = build_sources(enabled)
+
+        print("")
+        print("Running sources (stubbed):")
+        total = 0
+        for src in sources:
+            results = list(src.search())
+            total += len(results)
+            print(f"  - {src.name}: {len(results)} results")
+        print(f"Total results: {total}")
         return 0
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
