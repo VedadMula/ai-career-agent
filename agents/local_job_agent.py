@@ -6,6 +6,9 @@ import yaml
 from sources.indeed import IndeedSource
 from sources.monster import MonsterSource
 from sources.ziprecruiter import ZipRecruiterSource
+import json
+from datetime import datetime, timezone
+
 
 
 
@@ -66,6 +69,11 @@ def build_sources(enabled: list[str]):
         sources.append(cls())
     return sources
 
+def write_results(output_path: Path, payload: dict) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+
+
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     config_path = repo_root / "config" / "config.yaml"
@@ -84,6 +92,25 @@ def main() -> int:
             total += len(results)
             print(f"  - {src.name}: {len(results)} results")
         print(f"Total results: {total}")
+        output_cfg = cfg.get("output", {})
+        out_path = repo_root / output_cfg.get("path", "data/jobs.json")
+
+        payload = {
+            "run_utc": datetime.now(timezone.utc).isoformat(),
+            "config": {
+                "location": cfg.get("search", {}).get("location", {}),
+                "max_results_per_source": cfg.get("search", {}).get("max_results_per_source"),
+                "targets": cfg.get("targets", {}),
+                "sources_enabled": enabled,
+            },
+            "results": [],
+            "counts_by_source": {src.name: 0 for src in sources},
+            "total_results": total,
+        }
+
+        write_results(out_path, payload)
+        print(f"Wrote output file: {out_path}")
+
         return 0
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
