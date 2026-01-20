@@ -29,6 +29,7 @@ targets:
 
 sources:
   enabled:
+    - mock
     - indeed
     - monster
     - ziprecruiter

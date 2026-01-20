@@ -8,6 +8,8 @@ from sources.monster import MonsterSource
 from sources.ziprecruiter import ZipRecruiterSource
 import json
 from datetime import datetime, timezone
+from sources.mock import MockSource
+
 
 
 
@@ -55,10 +57,12 @@ def print_run_plan(cfg: dict) -> None:
 
 def build_sources(enabled: list[str]):
     registry = {
+        "mock": MockSource,
         "indeed": IndeedSource,
         "monster": MonsterSource,
         "ziprecruiter": ZipRecruiterSource,
     }
+
 
     sources = []
     for name in enabled:
@@ -73,6 +77,16 @@ def write_results(output_path: Path, payload: dict) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
+def dedupe_by_url(jobs: list) -> list:
+    seen = set()
+    unique = []
+    for job in jobs:
+        url = getattr(job, "url", None)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        unique.append(job)
+    return unique
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
@@ -85,15 +99,33 @@ def main() -> int:
         sources = build_sources(enabled)
 
         print("")
-        print("Running sources (stubbed):")
-        total = 0
+        print("Running sources:")
+        all_results = []
+        counts = {}
+
         for src in sources:
             results = list(src.search())
-            total += len(results)
+            counts[src.name] = len(results)
+            all_results.extend(results)
             print(f"  - {src.name}: {len(results)} results")
-        print(f"Total results: {total}")
-        output_cfg = cfg.get("output", {})
-        out_path = repo_root / output_cfg.get("path", "data/jobs.json")
+
+        unique_results = dedupe_by_url(all_results)
+        total = len(unique_results)
+        print(f"Total unique results: {total}")
+
+        results_payload = [
+            {
+                "source": r.source,
+                "title": r.title,
+                "company": r.company,
+                "location": r.location,
+                "url": r.url,
+                "date_found": r.date_found.isoformat() if hasattr(r.date_found, "isoformat") else str(r.date_found),
+                "distance_miles": r.distance_miles,
+                "description_snippet": r.description_snippet,
+            }
+            for r in unique_results
+        ]
 
         payload = {
             "run_utc": datetime.now(timezone.utc).isoformat(),
@@ -103,11 +135,13 @@ def main() -> int:
                 "targets": cfg.get("targets", {}),
                 "sources_enabled": enabled,
             },
-            "results": [],
-            "counts_by_source": {src.name: 0 for src in sources},
+            "results": results_payload,
+            "counts_by_source": counts,
             "total_results": total,
         }
-
+        output_cfg = cfg.get("output", {})
+        out_path = repo_root / output_cfg.get("path", "data/jobs.json")
+        
         write_results(out_path, payload)
         print(f"Wrote output file: {out_path}")
 
