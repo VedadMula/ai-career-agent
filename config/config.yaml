@@ -1,0 +1,38 @@
+project:
+  name: ai-career-agent
+  agent: local_job_search
+  version: 0.1.0
+
+search:
+  location:
+    city: Budd Lake
+    state: NJ
+    country: US
+    radius_miles: 1
+  max_results_per_source: 25
+
+targets:
+  keywords:
+    - cybersecurity
+    - security analyst
+    - soc analyst
+    - information security
+    - iam
+    - grc
+  titles:
+    - Cybersecurity Analyst
+    - Security Analyst
+    - SOC Analyst
+    - Information Security Analyst
+    - IAM Analyst
+    - GRC Analyst
+
+sources:
+  enabled:
+    - indeed
+    - monster
+    - ziprecruiter
+
+output:
+  format: json
+  path: data/jobs.json
