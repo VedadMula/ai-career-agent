@@ -207,3 +207,18 @@ marimo/_lsp/
 __marimo__/
 
 data/jobs.json
+
+# outputs
+data/jobs.json
+data/snapshots/*.json
+
+# keep folder structure
+!data/.gitkeep
+!data/snapshots/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.env
+

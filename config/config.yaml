@@ -8,7 +8,7 @@ search:
     city: Budd Lake
     state: NJ
     country: US
-    radius_miles: 1
+    radius_miles: 25
   max_results_per_source: 25
 
 targets:

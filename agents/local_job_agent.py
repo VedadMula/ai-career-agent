@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timezone
 from sources.mock import MockSource
 import argparse
+from sources.usajobs import UsaJobsSource
 
 
 
@@ -65,6 +66,7 @@ def build_sources(enabled: list[str]):
         "indeed": IndeedSource,
         "monster": MonsterSource,
         "ziprecruiter": ZipRecruiterSource,
+        "usajobs": UsaJobsSource,
     }
 
 
@@ -110,7 +112,11 @@ def dedupe_by_url(jobs: list) -> list:
     return unique
 
 def within_radius(job, radius_miles: float) -> bool:
-    # If distance is unknown, keep it for now (some sources won’t provide distance early)
+    # USAJOBS doesn't reliably provide distance; keep it.
+    source = str(getattr(job, "source", "") or "").lower()
+    if source == "usajobs":
+        return True
+
     d = getattr(job, "distance_miles", None)
     if d is None:
         return True
@@ -121,6 +127,8 @@ def within_radius(job, radius_miles: float) -> bool:
 
 
 def matches_targets(job, keywords: list[str], titles: list[str]) -> bool:
+    source = str(getattr(job, "source", "") or "").lower()
+
     haystack = " ".join(
         [
             str(getattr(job, "title", "") or ""),
@@ -132,11 +140,32 @@ def matches_targets(job, keywords: list[str], titles: list[str]) -> bool:
 
     title_text = str(getattr(job, "title", "") or "").lower()
 
-    kw_ok = any(k.lower() in haystack for k in keywords) if keywords else True
+    # USAJOBS titles often look like "IT Specialist (INFOSEC)" etc.
+    usajobs_bonus_terms = []
+    if source == "usajobs":
+        usajobs_bonus_terms = [
+            "infosec",
+            "information security",
+            "it specialist",
+            "security",
+            "cyber",
+            "incident",
+            "soc",
+            "risk",
+            "compliance",
+            "iam",
+            "authorization",
+            "assessment",
+            "rmf",
+        ]
+
+    expanded_keywords = (keywords or []) + usajobs_bonus_terms
+
+    kw_ok = any(k.lower() in haystack for k in expanded_keywords) if expanded_keywords else True
     title_ok = any(t.lower() in title_text for t in titles) if titles else True
 
-    # accept if either matches (we can tighten later)
     return kw_ok or title_ok
+
 
 
 def apply_filters(jobs: list, cfg: dict) -> list:
@@ -185,11 +214,39 @@ def main() -> int:
         all_results = []
         counts = {}
 
+        search_cfg = cfg.get("search", {})
+        loc_cfg = search_cfg.get("location", {})
+        targets_cfg = cfg.get("targets", {})
+
+        location_name = f"{loc_cfg.get('city')}, {loc_cfg.get('state')}" if loc_cfg.get("city") and loc_cfg.get("state") else None
+        radius = int(loc_cfg.get("radius_miles") or 25)
+        max_per_source = int(search_cfg.get("max_results_per_source") or 25)
+
         for src in sources:
-            results = list(src.search())
+            # Special handling: USAJOBS runs across ALL keywords
+            if getattr(src, "name", "") == "usajobs":
+                keywords = targets_cfg.get("keywords") or ["cybersecurity"]
+                results = []
+
+                for kw in keywords:
+                    results.extend(
+                        list(
+                            src.search(
+                                keyword=kw,
+                                location_name=location_name,
+                                radius_miles=radius,
+                                results_per_page=max_per_source,
+                                page=1,
+                            )
+                        )
+                    )
+            else:
+                results = list(src.search())
+
             counts[src.name] = len(results)
             all_results.extend(results)
             print(f"  - {src.name}: {len(results)} results")
+
 
         unique_results = dedupe_by_url(all_results)
         filtered_results = apply_filters(unique_results, cfg)
