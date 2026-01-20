@@ -9,6 +9,8 @@ from sources.ziprecruiter import ZipRecruiterSource
 import json
 from datetime import datetime, timezone
 from sources.mock import MockSource
+import argparse
+
 
 
 
@@ -26,7 +28,7 @@ def load_config(config_path: Path) -> dict:
     return data
 
 
-def print_run_plan(cfg: dict) -> None:
+def print_run_plan(cfg: dict, effective_sources: list[str] | None = None) -> None:
     project = cfg.get("project", {})
     search = cfg.get("search", {})
     location = search.get("location", {})
@@ -47,8 +49,10 @@ def print_run_plan(cfg: dict) -> None:
     print(f"  Titles: {', '.join(targets.get('titles', []))}")
     print("")
     print("Sources enabled:")
-    for s in sources.get("enabled", []):
+    enabled_list = effective_sources if effective_sources is not None else sources.get("enabled", [])
+    for s in enabled_list:
         print(f"  - {s}")
+
     print("")
     print("Output:")
     print(f"  Format: {output.get('format')}")
@@ -76,6 +80,23 @@ def build_sources(enabled: list[str]):
 def write_results(output_path: Path, payload: dict) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+
+def write_snapshot(repo_root: Path, payload: dict) -> Path:
+    snapshots_dir = repo_root / "data" / "snapshots"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = payload.get("run_utc", "").replace(":", "").replace("-", "")
+    # Example: 20260120T201237.856076+0000 -> keep it filesystem-safe
+    safe_ts = (
+        ts.replace("+", "Z")
+        .replace(".", "")
+        .replace("Z0000", "Z")
+        .replace("Z00:00", "Z")
+    )
+
+    snapshot_path = snapshots_dir / f"{safe_ts}_jobs.json"
+    write_results(snapshot_path, payload)
+    return snapshot_path
 
 def dedupe_by_url(jobs: list) -> list:
     seen = set()
@@ -133,14 +154,30 @@ def apply_filters(jobs: list, cfg: dict) -> list:
         filtered.append(j)
     return filtered
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="AI Career Agent - Local Job Search")
+    p.add_argument(
+        "--config",
+        default="config/config.yaml",
+        help="Path to config YAML (default: config/config.yaml)",
+    )
+    p.add_argument(
+        "--sources",
+        nargs="*",
+        default=None,
+        help="Optional list of sources to run (overrides config.sources.enabled)",
+    )
+    return p.parse_args()
+
 def main() -> int:
+    args = parse_args()
     repo_root = Path(__file__).resolve().parents[1]
-    config_path = repo_root / "config" / "config.yaml"
+    config_path = repo_root / args.config
 
     try:
         cfg = load_config(config_path)
-        print_run_plan(cfg)
-        enabled = cfg.get("sources", {}).get("enabled", [])
+        enabled = args.sources if args.sources is not None else cfg.get("sources", {}).get("enabled", [])
+        print_run_plan(cfg, effective_sources=enabled)
         sources = build_sources(enabled)
 
         print("")
@@ -192,6 +229,10 @@ def main() -> int:
 
         write_results(out_path, payload)
         print(f"Wrote output file: {out_path}")
+        
+        snapshot_path = write_snapshot(repo_root, payload)
+        print(f"Wrote snapshot: {snapshot_path}")
+
 
         return 0
     except Exception as e:
