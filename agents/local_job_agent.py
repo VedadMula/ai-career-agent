@@ -88,6 +88,51 @@ def dedupe_by_url(jobs: list) -> list:
         unique.append(job)
     return unique
 
+def within_radius(job, radius_miles: float) -> bool:
+    # If distance is unknown, keep it for now (some sources won’t provide distance early)
+    d = getattr(job, "distance_miles", None)
+    if d is None:
+        return True
+    try:
+        return float(d) <= float(radius_miles)
+    except Exception:
+        return True
+
+
+def matches_targets(job, keywords: list[str], titles: list[str]) -> bool:
+    haystack = " ".join(
+        [
+            str(getattr(job, "title", "") or ""),
+            str(getattr(job, "company", "") or ""),
+            str(getattr(job, "location", "") or ""),
+            str(getattr(job, "description_snippet", "") or ""),
+        ]
+    ).lower()
+
+    title_text = str(getattr(job, "title", "") or "").lower()
+
+    kw_ok = any(k.lower() in haystack for k in keywords) if keywords else True
+    title_ok = any(t.lower() in title_text for t in titles) if titles else True
+
+    # accept if either matches (we can tighten later)
+    return kw_ok or title_ok
+
+
+def apply_filters(jobs: list, cfg: dict) -> list:
+    radius = cfg.get("search", {}).get("location", {}).get("radius_miles", 1)
+    targets = cfg.get("targets", {})
+    keywords = targets.get("keywords", [])
+    titles = targets.get("titles", [])
+
+    filtered = []
+    for j in jobs:
+        if not within_radius(j, radius):
+            continue
+        if not matches_targets(j, keywords, titles):
+            continue
+        filtered.append(j)
+    return filtered
+
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     config_path = repo_root / "config" / "config.yaml"
@@ -110,8 +155,11 @@ def main() -> int:
             print(f"  - {src.name}: {len(results)} results")
 
         unique_results = dedupe_by_url(all_results)
-        total = len(unique_results)
-        print(f"Total unique results: {total}")
+        filtered_results = apply_filters(unique_results, cfg)
+        total = len(filtered_results)
+        print(f"Total unique results: {len(unique_results)}")
+        print(f"Total after filters: {total}")
+
 
         results_payload = [
             {
@@ -124,7 +172,7 @@ def main() -> int:
                 "distance_miles": r.distance_miles,
                 "description_snippet": r.description_snippet,
             }
-            for r in unique_results
+            for r in filtered_results
         ]
 
         payload = {
@@ -141,7 +189,7 @@ def main() -> int:
         }
         output_cfg = cfg.get("output", {})
         out_path = repo_root / output_cfg.get("path", "data/jobs.json")
-        
+
         write_results(out_path, payload)
         print(f"Wrote output file: {out_path}")
 
